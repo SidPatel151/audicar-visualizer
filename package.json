@@ -1,0 +1,30 @@
+{
+  "name": "audicar",
+  "private": true,
+  "version": "0.0.0",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "server": "node server.js",
+    "start:full": "concurrently \"npm run server\" \"npm run dev\""
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "dat.gui": "^0.7.9",
+    "simplex-noise": "^4.0.3",
+    "three": "^0.169.0",
+    "express": "^4.18.2",
+    "cors": "^2.8.5",
+    "@distube/ytdl-core": "^4.13.5",
+    "youtube-sr": "^4.3.4"
+  },
+  "devDependencies": {
+    "@types/react": "^18.2.0",
+    "@types/react-dom": "^18.2.0",
+    "@vitejs/plugin-react": "^4.2.0",
+    "vite": "^5.4.8",
+    "concurrently": "^8.2.2"
+  }
+}
