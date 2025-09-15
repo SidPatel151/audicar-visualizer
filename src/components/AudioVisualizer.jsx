@@ -50,6 +50,9 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
   const [searchResults, setSearchResults] = useState([]);
   const [isSearching, setIsSearching] = useState(false);
   const [showSearchResults, setShowSearchResults] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  // Track whether audioFile changes are initiated internally (so we can notify parent only then)
+  const shouldNotifyParentRef = useRef(false);
 
   useEffect(() => {
     // THREE.js setup
@@ -62,8 +65,14 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
     scene.add(camera);
     const renderer = new THREE.WebGLRenderer({ alpha: true, antialias: true });
     renderer.setSize(window.innerWidth, window.innerHeight);
-    containerRef.current.innerHTML = '';
-    containerRef.current.appendChild(renderer.domElement);
+    
+    // Clear any existing children and append the renderer
+    if (containerRef.current) {
+      while (containerRef.current.firstChild) {
+        containerRef.current.removeChild(containerRef.current.firstChild);
+      }
+      containerRef.current.appendChild(renderer.domElement);
+    }
 
     // Planes
     const planeGeometry = new THREE.PlaneGeometry(800, 800, 20, 20);
@@ -97,7 +106,7 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
     group.add(ball);
 
     // Particles
-    const particleCount = 5500;
+    const particleCount = 2000;
     const particlesGeometry = new THREE.BufferGeometry();
     const particlesMaterial = new THREE.PointsMaterial({
       size: 1.0,
@@ -220,40 +229,48 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
       particles.geometry.attributes.color.needsUpdate = true;
     }
 
-    const animate = () => {
-      if (analyserRef.current && dataArrayRef.current) {
-        analyserRef.current.getByteFrequencyData(dataArrayRef.current);
-        const lowerHalfArray = dataArrayRef.current.slice(0, dataArrayRef.current.length / 2 - 1);
-        const upperHalfArray = dataArrayRef.current.slice(dataArrayRef.current.length / 2 - 1, dataArrayRef.current.length - 1);
-        const overallAvg = avg(dataArrayRef.current);
-        const lowerMax = max(lowerHalfArray);
-        const lowerAvg = avg(lowerHalfArray);
-        const upperMax = max(upperHalfArray);
-        const upperAvg = avg(upperHalfArray);
-        const lowerMaxFr = lowerMax / lowerHalfArray.length;
-        const lowerAvgFr = lowerAvg / lowerHalfArray.length;
-        const upperMaxFr = upperMax / upperHalfArray.length;
-        const upperAvgFr = upperAvg / upperHalfArray.length;
-        makeRoughGround(plane, modulate(upperAvgFr, 0, 1, 0.5, 4));
-        makeRoughGround(plane2, modulate(lowerMaxFr, 0, 1, 0.5, 4));
-        makeRoughBall(
-          ball,
-          modulate(Math.pow(lowerMaxFr, 0.8), 0, 1, 0, 8),
-          modulate(upperAvgFr, 0, 1, 0, 4)
-        );
-        makeRoughParticles(
-          particles,
-          modulate(Math.pow(lowerMaxFr, 0.7), 0, 1, 0, 8),
-          modulate(upperMaxFr, 0, 1, 0, 4)
-        );
-        const color = new THREE.Color(`hsl(${modulate(upperAvgFr, 0, 1, 0, 360)}, 100%, 50%)`);
-        updateBackgroundColor(color);
-        ball.material.color = color;
-        const intensity = upperAvg / 255;
-        const rotationSpeed = cmodulate(intensity, 0, 1, 0.01, 0.1);
-        group.rotation.y += rotationSpeed + 0.001;
+    let lastTime = 0;
+    const targetFPS = 60;
+    const frameInterval = 1000 / targetFPS;
+    
+    const animate = (currentTime) => {
+      // Frame rate limiting
+      if (currentTime - lastTime >= frameInterval) {
+        if (analyserRef.current && dataArrayRef.current) {
+          analyserRef.current.getByteFrequencyData(dataArrayRef.current);
+          const lowerHalfArray = dataArrayRef.current.slice(0, dataArrayRef.current.length / 2 - 1);
+          const upperHalfArray = dataArrayRef.current.slice(dataArrayRef.current.length / 2 - 1, dataArrayRef.current.length - 1);
+          const overallAvg = avg(dataArrayRef.current);
+          const lowerMax = max(lowerHalfArray);
+          const lowerAvg = avg(lowerHalfArray);
+          const upperMax = max(upperHalfArray);
+          const upperAvg = avg(upperHalfArray);
+          const lowerMaxFr = lowerMax / lowerHalfArray.length;
+          const lowerAvgFr = lowerAvg / lowerHalfArray.length;
+          const upperMaxFr = upperMax / upperHalfArray.length;
+          const upperAvgFr = upperAvg / upperHalfArray.length;
+          makeRoughGround(plane, modulate(upperAvgFr, 0, 1, 0.5, 4));
+          makeRoughGround(plane2, modulate(lowerMaxFr, 0, 1, 0.5, 4));
+          makeRoughBall(
+            ball,
+            modulate(Math.pow(lowerMaxFr, 0.8), 0, 1, 0, 8),
+            modulate(upperAvgFr, 0, 1, 0, 4)
+          );
+          makeRoughParticles(
+            particles,
+            modulate(Math.pow(lowerMaxFr, 0.7), 0, 1, 0, 8),
+            modulate(upperMaxFr, 0, 1, 0, 4)
+          );
+          const color = new THREE.Color(`hsl(${modulate(upperAvgFr, 0, 1, 0, 360)}, 100%, 50%)`);
+          updateBackgroundColor(color);
+          ball.material.color = color;
+          const intensity = upperAvg / 255;
+          const rotationSpeed = cmodulate(intensity, 0, 1, 0.01, 0.1);
+          group.rotation.y += rotationSpeed + 0.001;
+        }
+        renderer.render(scene, camera);
+        lastTime = currentTime;
       }
-      renderer.render(scene, camera);
       requestAnimationFrame(animate);
     };
     animate();
@@ -280,7 +297,7 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
         setIsPlaying(false);
       }
     }
-  }, [propAudioFile, audioFile]);
+  }, [propAudioFile]);
 
   // Function to play a specific audio file
   const playAudioFile = (audioData) => {
@@ -292,12 +309,18 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
     }
   };
 
-  // Expose playAudioFile function to parent component
+  // Expose playAudioFile function to parent component without causing render loops
+  const onAudioChangeRef = useRef(onAudioChange);
   useEffect(() => {
-    if (onAudioChange) {
-      onAudioChange({ ...audioFile, playAudioFile });
+    onAudioChangeRef.current = onAudioChange;
+  }, [onAudioChange]);
+  useEffect(() => {
+    if (audioFile && shouldNotifyParentRef.current && onAudioChangeRef.current) {
+      onAudioChangeRef.current({ ...audioFile, playAudioFile });
+      // Reset the flag so external updates do not loop
+      shouldNotifyParentRef.current = false;
     }
-  }, [audioFile, onAudioChange]);
+  }, [audioFile]);
 
   const cleanupAudio = () => {
     try {
@@ -375,28 +398,50 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
         
         // Create a file object from the downloaded audio
         const audioFile = new File([blob], result.filename, { type: 'audio/mpeg' });
+        // mark as internal change so we notify parent once
+        shouldNotifyParentRef.current = true;
         setAudioFile(audioFile);
         setShowOptions(false);
         setShowSearchResults(false);
         
         // Load the audio
         const audio = audioRef.current;
-        if (audio) {
-          const newAudio = audio.cloneNode();
-          audio.parentNode.replaceChild(newAudio, audio);
-          audioRef.current = newAudio;
+        if (audio && !isLoading) {
+          setIsLoading(true);
           
-          newAudio.src = URL.createObjectURL(audioFile);
-          newAudio.addEventListener('loadeddata', () => {
-            setupAudioAnalyser(newAudio);
-            newAudio.play().then(() => {
+          // Clean up existing audio context
+          cleanupAudio();
+          
+          // Stop current audio and wait
+          audio.pause();
+          audio.currentTime = 0;
+          
+          // Wait a bit before loading new audio
+          await new Promise(resolve => setTimeout(resolve, 100));
+          
+          audio.src = '';
+          audio.load();
+          
+          const audioUrl = URL.createObjectURL(audioFile);
+          
+          const handleLoadedData = () => {
+            setupAudioAnalyser(audio);
+            audio.play().then(() => {
               setIsPlaying(true);
+              setIsLoading(false);
             }).catch((e) => {
               setDownloadMessage('⚠️ Click play to start (auto-play blocked)');
               setTimeout(() => setDownloadMessage(''), 3000);
+              setIsLoading(false);
             });
-          });
-          newAudio.load();
+            
+            // Remove event listener after use
+            audio.removeEventListener('loadeddata', handleLoadedData);
+          };
+          
+          audio.addEventListener('loadeddata', handleLoadedData);
+          audio.src = audioUrl;
+          audio.load();
         }
         
         setTimeout(() => setDownloadMessage(''), 2000);
@@ -465,50 +510,71 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
 
   const handleFileChange = async (event) => {
     const file = event.target.files[0];
-    if (!file) return;
+    if (!file || isLoading) return;
     
     console.log('File selected:', file.name);
+    setIsLoading(true);
+    // mark as internal change so we notify parent once
+    shouldNotifyParentRef.current = true;
     setAudioFile(file);
     setShowOptions(false);
     
+    // Clean up existing audio context
+    cleanupAudio();
+    
+    // Create new audio element properly
     const audio = audioRef.current;
-    if (!audio) {
-      console.error('Audio element not found!');
-      setDownloadMessage('❌ Audio element not found!');
-      return;
+    if (audio) {
+      // Stop current audio and wait for it to stop
+      audio.pause();
+      audio.currentTime = 0;
+      
+      // Wait a bit before loading new audio
+      await new Promise(resolve => setTimeout(resolve, 100));
+      
+      audio.src = '';
+      audio.load();
     }
     
-    // Remove old event listeners by cloning the element
-    const newAudio = audio.cloneNode();
-    audio.parentNode.replaceChild(newAudio, audio);
-    audioRef.current = newAudio;
-    
     console.log('Setting audio src...');
-    newAudio.src = URL.createObjectURL(file);
+    const audioUrl = URL.createObjectURL(file);
     
-    newAudio.addEventListener('loadeddata', () => {
+    const handleLoadedData = () => {
       console.log('Audio file loaded successfully!');
-      setupAudioAnalyser(newAudio);
+      setupAudioAnalyser(audio);
       
       console.log('Attempting auto-play...');
-      newAudio.play().then(() => {
+      audio.play().then(() => {
         console.log('Auto-play started!');
         setIsPlaying(true);
+        setIsLoading(false);
       }).catch((e) => {
         console.log('Auto-play failed, user needs to click play:', e);
         setDownloadMessage('⚠️ Click play to start (auto-play blocked)');
         setTimeout(() => setDownloadMessage(''), 3000);
+        setIsLoading(false);
       });
-    });
+      
+      // Remove event listener after use
+      audio.removeEventListener('loadeddata', handleLoadedData);
+    };
     
-    newAudio.addEventListener('error', (e) => {
+    const handleError = (e) => {
       console.error('Audio loading error:', e);
       setDownloadMessage('❌ Error loading audio file');
       setTimeout(() => setDownloadMessage(''), 5000);
-    });
+      setIsLoading(false);
+      
+      // Remove event listener after use
+      audio.removeEventListener('error', handleError);
+    };
+    
+    audio.addEventListener('loadeddata', handleLoadedData);
+    audio.addEventListener('error', handleError);
     
     console.log('Loading audio...');
-    newAudio.load();
+    audio.src = audioUrl;
+    audio.load();
   };
 
   return (
@@ -729,7 +795,7 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
             <button
               onClick={async () => {
                 const audio = audioRef.current;
-                if (audio) {
+                if (audio && !isLoading) {
                   if (audio.paused) {
                     try {
                       if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
