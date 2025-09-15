@@ -8,24 +8,27 @@ const app = express();
 const PORT = process.env.PORT || 3001;
 
 // Middleware
-app.use(cors());
+app.use(cors({
+  origin: ['http://localhost:5173', 'http://localhost:3000'],
+  credentials: true
+}));
 app.use(express.json());
 app.use('/downloads', express.static(path.join(__dirname, 'downloads')));
 
 // Search YouTube using youtube-downloader.js
-app.post('/api/search', async (req, res) => {
+app.get('/api/search', async (req, res) => {
   try {
-    const { query, maxResults = 5 } = req.body;
+    const { q: query, maxResults = 5 } = req.query;
     
     if (!query) {
-      return res.status(400).json({ error: 'Query is required' });
+      return res.status(400).json({ success: false, error: 'Query is required' });
     }
 
     console.log(`🔍 Searching for: "${query}"`);
     const results = await searchYouTube(query, maxResults);
     
     if (!results || results.length === 0) {
-      return res.status(404).json({ error: 'No videos found for this search term' });
+      return res.status(404).json({ success: false, error: 'No videos found for this search term' });
     }
 
     const formattedResults = results.map(video => ({
@@ -38,24 +41,26 @@ app.post('/api/search', async (req, res) => {
       thumbnail: video.thumbnail?.url
     }));
 
-    res.json({ results: formattedResults });
+    res.json({ success: true, data: formattedResults });
   } catch (error) {
     console.error('Search error:', error);
-    res.status(500).json({ error: 'Search failed: ' + error.message });
+    res.status(500).json({ success: false, error: 'Search failed: ' + error.message });
   }
 });
 
 // Download video/audio
 app.post('/api/download', async (req, res) => {
   try {
-    const { url, format = 'mp3' } = req.body;
+    const { videoId, format = 'mp3' } = req.body;
     
-    if (!url) {
-      return res.status(400).json({ error: 'URL is required' });
+    if (!videoId) {
+      return res.status(400).json({ success: false, error: 'Video ID is required' });
     }
 
+    const url = `https://www.youtube.com/watch?v=${videoId}`;
+    
     if (!isValidYouTubeUrl(url)) {
-      return res.status(400).json({ error: 'Invalid YouTube URL' });
+      return res.status(400).json({ success: false, error: 'Invalid YouTube URL' });
     }
 
     console.log(`🚀 Starting ${format.toUpperCase()} download for: ${url}`);
@@ -68,7 +73,18 @@ app.post('/api/download', async (req, res) => {
     }
 
     const filename = path.basename(filePath);
-    const downloadUrl = `/downloads/${filename}`;
+    
+    // Wait a moment for file processing to complete
+    await new Promise(resolve => setTimeout(resolve, 1000));
+    
+    // Check if file exists before reading
+    if (!fs.existsSync(filePath)) {
+      throw new Error(`Downloaded file not found: ${filePath}`);
+    }
+    
+    // Read the file and send it as base64 for the frontend
+    const audioData = fs.readFileSync(filePath);
+    const base64Audio = audioData.toString('base64');
     
     // Clean up any temporary HTML files created during download
     setTimeout(() => {
@@ -87,14 +103,14 @@ app.post('/api/download', async (req, res) => {
     
     res.json({ 
       success: true, 
-      filePath: downloadUrl,
       filename: filename,
+      audioData: base64Audio,
       message: `${format.toUpperCase()} download completed successfully!` 
     });
     
   } catch (error) {
     console.error('Download error:', error);
-    res.status(500).json({ error: 'Download failed: ' + error.message });
+    res.status(500).json({ success: false, error: 'Download failed: ' + error.message });
   }
 });
 

@@ -3,6 +3,7 @@ import * as THREE from 'three';
 import { createNoise2D, createNoise3D } from 'simplex-noise';
 import vertexShader from '../shaders/vertex.js';
 import fragmentShader from '../shaders/fragment.js';
+import { API_ENDPOINTS } from '../config/api';
 
 const noise2D = createNoise2D();
 const noise3D = createNoise3D();
@@ -30,22 +31,25 @@ function max(arr) {
   });
 }
 
-const AudioVisualizer = () => {
+const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
   const containerRef = useRef(null);
   const audioRef = useRef(null);
   const analyserRef = useRef(null);
   const dataArrayRef = useRef(null);
   const audioContextRef = useRef(null);
   const sourceRef = useRef(null);
-  const [audioFile, setAudioFile] = useState(null);
+  const [audioFile, setAudioFile] = useState(propAudioFile);
   const [showOptions, setShowOptions] = useState(true);
   const [youtubeUrl, setYoutubeUrl] = useState('');
   const [isDownloading, setIsDownloading] = useState(false);
-  const [searchResults, setSearchResults] = useState([]);
   const [downloadMessage, setDownloadMessage] = useState('');
   const [isPlaying, setIsPlaying] = useState(false);
   const [controlsPosition, setControlsPosition] = useState(50);
   const fileInputRef = useRef(null);
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState([]);
+  const [isSearching, setIsSearching] = useState(false);
+  const [showSearchResults, setShowSearchResults] = useState(false);
 
   useEffect(() => {
     // THREE.js setup
@@ -261,6 +265,40 @@ const AudioVisualizer = () => {
     };
   }, []);
 
+  // Handle prop changes
+  useEffect(() => {
+    if (propAudioFile && propAudioFile !== audioFile) {
+      setAudioFile(propAudioFile);
+      // Load the audio file when it changes
+      if (audioRef.current) {
+        audioRef.current.src = propAudioFile.url;
+        audioRef.current.load();
+        // Stop any currently playing audio
+        audioRef.current.pause();
+        audioRef.current.currentTime = 0;
+        // Reset visualizer state
+        setIsPlaying(false);
+      }
+    }
+  }, [propAudioFile, audioFile]);
+
+  // Function to play a specific audio file
+  const playAudioFile = (audioData) => {
+    if (audioRef.current && audioData && audioData.url) {
+      audioRef.current.src = audioData.url;
+      audioRef.current.load();
+      audioRef.current.play();
+      setIsPlaying(true);
+    }
+  };
+
+  // Expose playAudioFile function to parent component
+  useEffect(() => {
+    if (onAudioChange) {
+      onAudioChange({ ...audioFile, playAudioFile });
+    }
+  }, [audioFile, onAudioChange]);
+
   const cleanupAudio = () => {
     try {
       if (sourceRef.current) {
@@ -275,6 +313,103 @@ const AudioVisualizer = () => {
       dataArrayRef.current = null;
     } catch (error) {
       console.error('Error cleaning up audio:', error);
+    }
+  };
+
+  const searchYouTube = async (query) => {
+    if (!query.trim()) return;
+    
+    setIsSearching(true);
+    setDownloadMessage('🔍 Searching YouTube...');
+    
+    try {
+      const response = await fetch(`${API_ENDPOINTS.SEARCH}?q=${encodeURIComponent(query)}`);
+      const results = await response.json();
+      
+      if (results.success) {
+        setSearchResults(results.data);
+        setShowSearchResults(true);
+        setDownloadMessage('✅ Search completed!');
+        setTimeout(() => setDownloadMessage(''), 2000);
+      } else {
+        setDownloadMessage('❌ Search failed: ' + results.error);
+        setTimeout(() => setDownloadMessage(''), 3000);
+      }
+    } catch (error) {
+      console.error('Search error:', error);
+      setDownloadMessage('❌ Search failed: ' + error.message);
+      setTimeout(() => setDownloadMessage(''), 3000);
+    } finally {
+      setIsSearching(false);
+    }
+  };
+
+  const downloadFromYouTube = async (videoId, format = 'mp3') => {
+    setIsDownloading(true);
+    setDownloadMessage(`⬇️ Downloading ${format.toUpperCase()}...`);
+    
+    try {
+      const response = await fetch(API_ENDPOINTS.DOWNLOAD, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          videoId: videoId,
+          format: format
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        setDownloadMessage('✅ Download completed!');
+        
+        // Convert base64 to blob
+        const binaryString = atob(result.audioData);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], { type: 'audio/mpeg' });
+        
+        // Create a file object from the downloaded audio
+        const audioFile = new File([blob], result.filename, { type: 'audio/mpeg' });
+        setAudioFile(audioFile);
+        setShowOptions(false);
+        setShowSearchResults(false);
+        
+        // Load the audio
+        const audio = audioRef.current;
+        if (audio) {
+          const newAudio = audio.cloneNode();
+          audio.parentNode.replaceChild(newAudio, audio);
+          audioRef.current = newAudio;
+          
+          newAudio.src = URL.createObjectURL(audioFile);
+          newAudio.addEventListener('loadeddata', () => {
+            setupAudioAnalyser(newAudio);
+            newAudio.play().then(() => {
+              setIsPlaying(true);
+            }).catch((e) => {
+              setDownloadMessage('⚠️ Click play to start (auto-play blocked)');
+              setTimeout(() => setDownloadMessage(''), 3000);
+            });
+          });
+          newAudio.load();
+        }
+        
+        setTimeout(() => setDownloadMessage(''), 2000);
+      } else {
+        setDownloadMessage('❌ Download failed: ' + result.error);
+        setTimeout(() => setDownloadMessage(''), 5000);
+      }
+    } catch (error) {
+      console.error('Download error:', error);
+      setDownloadMessage('❌ Download failed: ' + error.message);
+      setTimeout(() => setDownloadMessage(''), 5000);
+    } finally {
+      setIsDownloading(false);
     }
   };
 
@@ -401,7 +536,133 @@ const AudioVisualizer = () => {
             Upload an audio file to start:
           </p>
           
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '400px' }}>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '500px' }}>
+            {/* YouTube Search Section */}
+            <div style={{ border: '1px solid #333', padding: '20px', borderRadius: '10px' }}>
+              <h3>🎵 Search & Download from YouTube</h3>
+              <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
+                <input
+                  type="text"
+                  placeholder="Search for songs on YouTube..."
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onKeyPress={(e) => e.key === 'Enter' && searchYouTube(searchQuery)}
+                  style={{
+                    flex: 1,
+                    padding: '10px',
+                    backgroundColor: '#333',
+                    color: 'white',
+                    border: '1px solid #555',
+                    borderRadius: '5px',
+                    fontSize: '14px'
+                  }}
+                />
+                <button
+                  onClick={() => searchYouTube(searchQuery)}
+                  disabled={isSearching || !searchQuery.trim()}
+                  style={{
+                    padding: '10px 20px',
+                    backgroundColor: isSearching ? '#666' : '#ff0000',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '5px',
+                    cursor: isSearching ? 'not-allowed' : 'pointer',
+                    fontSize: '14px'
+                  }}
+                >
+                  {isSearching ? '🔍' : '🔍 Search'}
+                </button>
+              </div>
+            </div>
+
+            {/* Search Results */}
+            {showSearchResults && searchResults.length > 0 && (
+              <div style={{ border: '1px solid #333', padding: '20px', borderRadius: '10px', maxHeight: '300px', overflowY: 'auto' }}>
+                <h3>🎵 Search Results</h3>
+                {searchResults.map((video, index) => (
+                  <div key={index} style={{ 
+                    display: 'flex', 
+                    alignItems: 'center', 
+                    gap: '10px', 
+                    padding: '10px', 
+                    border: '1px solid #555', 
+                    borderRadius: '5px', 
+                    marginBottom: '10px',
+                    backgroundColor: '#222'
+                  }}>
+                    <img 
+                      src={video.thumbnail} 
+                      alt={video.title}
+                      style={{ width: '60px', height: '45px', objectFit: 'cover', borderRadius: '3px' }}
+                    />
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      <div style={{ 
+                        fontSize: '12px', 
+                        color: '#ccc', 
+                        whiteSpace: 'nowrap', 
+                        overflow: 'hidden', 
+                        textOverflow: 'ellipsis' 
+                      }}>
+                        {video.title}
+                      </div>
+                      <div style={{ fontSize: '10px', color: '#888', marginTop: '2px' }}>
+                        {video.duration} • {video.views}
+                      </div>
+                    </div>
+                    <div style={{ display: 'flex', gap: '5px' }}>
+                      <button
+                        onClick={() => downloadFromYouTube(video.id, 'mp3')}
+                        disabled={isDownloading}
+                        style={{
+                          padding: '5px 10px',
+                          backgroundColor: isDownloading ? '#666' : '#00ff00',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '3px',
+                          cursor: isDownloading ? 'not-allowed' : 'pointer',
+                          fontSize: '10px'
+                        }}
+                      >
+                        MP3
+                      </button>
+                      <button
+                        onClick={() => downloadFromYouTube(video.id, 'mp4')}
+                        disabled={isDownloading}
+                        style={{
+                          padding: '5px 10px',
+                          backgroundColor: isDownloading ? '#666' : '#0066ff',
+                          color: 'white',
+                          border: 'none',
+                          borderRadius: '3px',
+                          cursor: isDownloading ? 'not-allowed' : 'pointer',
+                          fontSize: '10px'
+                        }}
+                      >
+                        MP4
+                      </button>
+                    </div>
+                  </div>
+                ))}
+                <button
+                  onClick={() => setShowSearchResults(false)}
+                  style={{
+                    width: '100%',
+                    padding: '8px',
+                    backgroundColor: '#333',
+                    color: 'white',
+                    border: 'none',
+                    borderRadius: '3px',
+                    cursor: 'pointer',
+                    fontSize: '12px',
+                    marginTop: '10px'
+                  }}
+                >
+                  Close Results
+                </button>
+              </div>
+            )}
+
+            {/* File Upload Section */}
             <div style={{ border: '1px solid #333', padding: '20px', borderRadius: '10px' }}>
               <h3>📁 Upload Audio File</h3>
               <label htmlFor="thefile" className="file-input-label" style={{
@@ -551,3 +812,4 @@ const AudioVisualizer = () => {
 };
 
 export default AudioVisualizer;
+
