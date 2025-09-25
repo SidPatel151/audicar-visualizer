@@ -311,87 +311,19 @@ async function downloadVideo(url, outputPath = './downloads') {
             throw new Error('Invalid YouTube URL!');
         }
 
-        try {
-            console.log('📋 Getting video information...');
-            const videoInfo = await getVideoInfo(url);
-            
-            console.log(`📺 Title: ${videoInfo.title}`);
-            console.log(`👤 Author: ${videoInfo.author}`);
-            console.log(`⏱️  Duration: ${Math.floor(videoInfo.duration / 60)}:${videoInfo.duration % 60} minutes`);
-            console.log(`👀 Views: ${parseInt(videoInfo.views).toLocaleString()}`);
+        console.log('📋 Starting download with yt-dlp...');
 
-            // Create downloads directory if it doesn't exist
-            if (!fs.existsSync(outputPath)) {
-                fs.mkdirSync(outputPath, { recursive: true });
-            }
-
-            // Sanitize filename
-            const filename = sanitizeFilename(videoInfo.title) + '.mp4';
-            const filePath = `${outputPath}/${filename}`;
-
-            console.log(`⬇️  Starting download: ${filename}`);
-
-            // Download video with highest quality MP4 format
-            const videoStream = ytdl(url, {
-                quality: 'highest',
-                filter: format => format.container === 'mp4',
-                requestOptions: getRequestOptions()
-            });
-
-            const writeStream = fs.createWriteStream(filePath);
-            
-            // Track download progress
-            let totalSize = 0;
-            let downloadedSize = 0;
-
-            videoStream.on('info', (info, format) => {
-                totalSize = parseInt(format.contentLength) || 0;
-                console.log(`📦 File size: ${(totalSize / (1024 * 1024)).toFixed(2)} MB`);
-            });
-
-            videoStream.on('data', (chunk) => {
-                downloadedSize += chunk.length;
-                if (totalSize > 0) {
-                    const progress = ((downloadedSize / totalSize) * 100).toFixed(1);
-                    process.stdout.write(`\r📊 Progress: ${progress}% (${(downloadedSize / (1024 * 1024)).toFixed(2)}MB / ${(totalSize / (1024 * 1024)).toFixed(2)}MB)`);
-                }
-            });
-
-            videoStream.pipe(writeStream);
-
-            return new Promise((resolve, reject) => {
-                writeStream.on('finish', () => {
-                    console.log(`\n✅ Download completed successfully!`);
-                    console.log(`📁 File saved as: ${filePath}`);
-                    resolve(filePath);
-                });
-
-                videoStream.on('error', (error) => {
-                    console.log(`\n❌ Download error: ${error.message}`);
-                    reject(error);
-                });
-
-                writeStream.on('error', (error) => {
-                    console.log(`\n❌ File write error: ${error.message}`);
-                    reject(error);
-                });
-            });
-
-        } catch (error) {
-            if (error.message === 'ytdl-failed') {
-                // Try fallback method
-                const ytDlpAvailable = await checkYtDlp();
-                if (ytDlpAvailable) {
-                    return await downloadWithYtDlp(url, 'mp4', outputPath);
-                } else {
-                    console.log('📋 To install yt-dlp for more reliable downloads:');
-                    console.log('   brew install yt-dlp    (macOS)');
-                    console.log('   pip install yt-dlp     (Python)');
-                    throw new Error('Primary download method failed and yt-dlp not available');
-                }
-            }
-            throw error;
+        // Check if yt-dlp is available first
+        const ytDlpAvailable = await checkYtDlp();
+        if (!ytDlpAvailable) {
+            console.log('❌ yt-dlp not found. Please install it:');
+            console.log('   brew install yt-dlp    (macOS)');
+            console.log('   pip install yt-dlp     (Python)');
+            throw new Error('yt-dlp not available');
         }
+
+        // Use yt-dlp immediately as primary method
+        return await downloadWithYtDlp(url, 'mp4', outputPath);
 
     } catch (error) {
         console.log(`❌ Error: ${error.message}`);
@@ -408,68 +340,19 @@ async function downloadAudio(url, outputPath = './downloads') {
             throw new Error('Invalid YouTube URL!');
         }
 
-        try {
-            console.log('📋 Getting video information...');
-            const videoInfo = await getVideoInfo(url);
-            
-            console.log(`🎵 Title: ${videoInfo.title}`);
-            console.log(`👤 Author: ${videoInfo.author}`);
+        console.log('📋 Starting audio download with yt-dlp...');
 
-            // Create downloads directory if it doesn't exist
-            if (!fs.existsSync(outputPath)) {
-                fs.mkdirSync(outputPath, { recursive: true });
-            }
-
-            // Sanitize filename
-            const filename = sanitizeFilename(videoInfo.title) + '.mp3';
-            const filePath = `${outputPath}/${filename}`;
-
-            console.log(`⬇️  Starting audio download: ${filename}`);
-
-            // Download audio with highest quality
-            const audioStream = ytdl(url, {
-                quality: 'highestaudio',
-                filter: 'audioonly',
-                requestOptions: getRequestOptions()
-            });
-
-            const writeStream = fs.createWriteStream(filePath);
-            
-            audioStream.pipe(writeStream);
-
-            return new Promise((resolve, reject) => {
-                writeStream.on('finish', () => {
-                    console.log(`\n✅ Audio download completed successfully!`);
-                    console.log(`📁 File saved as: ${filePath}`);
-                    resolve(filePath);
-                });
-
-                audioStream.on('error', (error) => {
-                    console.log(`\n❌ Download error: ${error.message}`);
-                    reject(error);
-                });
-
-                writeStream.on('error', (error) => {
-                    console.log(`\n❌ File write error: ${error.message}`);
-                    reject(error);
-                });
-            });
-
-        } catch (error) {
-            if (error.message === 'ytdl-failed') {
-                // Try fallback method
-                const ytDlpAvailable = await checkYtDlp();
-                if (ytDlpAvailable) {
-                    return await downloadWithYtDlp(url, 'mp3', outputPath);
-                } else {
-                    console.log('📋 To install yt-dlp for more reliable downloads:');
-                    console.log('   brew install yt-dlp    (macOS)');
-                    console.log('   pip install yt-dlp     (Python)');
-                    throw new Error('Primary download method failed and yt-dlp not available');
-                }
-            }
-            throw error;
+        // Check if yt-dlp is available first
+        const ytDlpAvailable = await checkYtDlp();
+        if (!ytDlpAvailable) {
+            console.log('❌ yt-dlp not found. Please install it:');
+            console.log('   brew install yt-dlp    (macOS)');
+            console.log('   pip install yt-dlp     (Python)');
+            throw new Error('yt-dlp not available');
         }
+
+        // Use yt-dlp immediately as primary method
+        return await downloadWithYtDlp(url, 'mp3', outputPath);
 
     } catch (error) {
         console.log(`❌ Error: ${error.message}`);

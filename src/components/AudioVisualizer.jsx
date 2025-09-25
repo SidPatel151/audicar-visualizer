@@ -324,15 +324,17 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
 
   const cleanupAudio = () => {
     try {
+      // Disconnect analyser first
+      if (analyserRef.current) {
+        try { analyserRef.current.disconnect(); } catch (_) {}
+        analyserRef.current = null;
+      }
+      // Keep source node if we plan to reuse the same media element; just disconnect chains
       if (sourceRef.current) {
-        sourceRef.current.disconnect();
-        sourceRef.current = null;
+        try { sourceRef.current.disconnect(); } catch (_) {}
       }
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-        audioContextRef.current = null;
-      }
-      analyserRef.current = null;
+      // Do not close AudioContext here; reuse improves reliability
+      // We'll lazily create/resume it in setupAudioAnalyser
       dataArrayRef.current = null;
     } catch (error) {
       console.error('Error cleaning up audio:', error);
@@ -460,27 +462,31 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
 
   const setupAudioAnalyser = async (audioElement) => {
     try {
-      // Clean up any existing audio context first
-      cleanupAudio();
-      
-      if (!audioElement) {
-        console.error('No audio element provided');
-        setDownloadMessage('❌ No audio element available');
-        return;
+      // Ensure a single AudioContext exists (reuse)
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext || window.webkitAudioContext)();
       }
+      const audioContext = audioContextRef.current;
       
-      const audioContext = new (window.AudioContext || window.webkitAudioContext)();
+      // If we already created a source for this element, reuse it; else create once
+      if (!sourceRef.current) {
+        sourceRef.current = audioContext.createMediaElementSource(audioElement);
+      }
+      const source = sourceRef.current;
+      
+      // Create a fresh analyser and connect chain: source -> analyser -> destination
+      if (analyserRef.current) {
+        try { analyserRef.current.disconnect(); } catch (_) {}
+      }
       const analyser = audioContext.createAnalyser();
       analyser.fftSize = 512;
       const bufferLength = analyser.frequencyBinCount;
       const dataArray = new Uint8Array(bufferLength);
-      
-      audioContextRef.current = audioContext;
       analyserRef.current = analyser;
       dataArrayRef.current = dataArray;
       
-      const source = audioContext.createMediaElementSource(audioElement);
-      sourceRef.current = source;
+      // Reconnect graph
+      source.disconnect();
       source.connect(analyser);
       analyser.connect(audioContext.destination);
       
