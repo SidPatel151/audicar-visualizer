@@ -22,25 +22,33 @@ function App() {
 
   return (
     <div className="App">
-      <div className="app-header">
-        <h1>🎵 AudioCar - Music Visualizer & Downloader</h1>
-        <div className="tab-buttons">
-          <button 
-            className={`tab-button ${activeTab === 'visualizer' ? 'active' : ''}`}
-            onClick={() => setActiveTab('visualizer')}
-          >
-            🎨 Visualizer
-          </button>
-          <button 
-            className={`tab-button ${activeTab === 'downloader' ? 'active' : ''}`}
-            onClick={() => setActiveTab('downloader')}
-          >
-            🎵 Downloader
-          </button>
+      <header className="app-header">
+        <div className="header-content">
+          <div className="logo-section">
+            <h1 className="app-title">🎵 AudioCar</h1>
+            <p className="app-subtitle">Music Visualizer & Downloader</p>
+          </div>
+          
+          <nav className="tab-navigation">
+            <button 
+              className={`tab-button ${activeTab === 'visualizer' ? 'active' : ''}`}
+              onClick={() => setActiveTab('visualizer')}
+            >
+              <span className="tab-icon">🎨</span>
+              <span className="tab-text">Visualizer</span>
+            </button>
+            <button 
+              className={`tab-button ${activeTab === 'downloader' ? 'active' : ''}`}
+              onClick={() => setActiveTab('downloader')}
+            >
+              <span className="tab-icon">🎵</span>
+              <span className="tab-text">Downloader</span>
+            </button>
+          </nav>
         </div>
-      </div>
+      </header>
 
-      <div className="app-content">
+      <main className="app-content">
         {activeTab === 'visualizer' && (
           <AudioVisualizer 
             audioFile={currentAudio}
@@ -51,7 +59,7 @@ function App() {
         {activeTab === 'downloader' && (
           <YouTubeDownloader onAudioDownloaded={handleAudioDownloaded} />
         )}
-      </div>
+      </main>
     </div>
   );
 }

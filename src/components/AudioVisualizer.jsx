@@ -4,6 +4,7 @@ import { createNoise2D, createNoise3D } from 'simplex-noise';
 import vertexShader from '../shaders/vertex.js';
 import fragmentShader from '../shaders/fragment.js';
 import { API_ENDPOINTS } from '../config/api';
+import './AudioVisualizer.css';
 
 const noise2D = createNoise2D();
 const noise3D = createNoise3D();
@@ -585,300 +586,233 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
 
   return (
     <div className="audio-visualizer">
-      <div ref={containerRef} style={{ width: '100vw', height: '100vh', position: 'absolute', top: 0, left: 0, zIndex: 1 }} />
+      <div ref={containerRef} className="visualizer-canvas" />
       
       {showOptions && (
-        <div className="options-overlay" style={{
-          position: 'absolute',
-          top: 0,
-          left: 0,
-          width: '100vw',
-          height: '100vh',
-          backgroundColor: 'rgba(0, 0, 0, 0.9)',
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 10,
-          color: 'white',
-          fontFamily: 'Saira, sans-serif'
-        }}>
-          <h1 style={{ marginBottom: '30px', fontSize: '2.5rem' }}>🎵 Audio Visualizer</h1>
-          <p style={{ marginBottom: '30px', fontSize: '1.2rem', textAlign: 'center' }}>
-            Upload an audio file to start:
-          </p>
-          
-          <div style={{ display: 'flex', flexDirection: 'column', gap: '20px', width: '500px' }}>
-            {/* YouTube Search Section */}
-            <div style={{ border: '1px solid #333', padding: '20px', borderRadius: '10px' }}>
-              <h3>🎵 Search & Download from YouTube</h3>
-              <div style={{ display: 'flex', gap: '10px', marginBottom: '15px' }}>
-                <input
-                  type="text"
-                  placeholder="Search for songs on YouTube..."
-                  value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
-                  onKeyPress={(e) => e.key === 'Enter' && searchYouTube(searchQuery)}
-                  style={{
-                    flex: 1,
-                    padding: '10px',
-                    backgroundColor: '#333',
-                    color: 'white',
-                    border: '1px solid #555',
-                    borderRadius: '5px',
-                    fontSize: '14px'
-                  }}
-                />
-                <button
-                  onClick={() => searchYouTube(searchQuery)}
-                  disabled={isSearching || !searchQuery.trim()}
-                  style={{
-                    padding: '10px 20px',
-                    backgroundColor: isSearching ? '#666' : '#ff0000',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '5px',
-                    cursor: isSearching ? 'not-allowed' : 'pointer',
-                    fontSize: '14px'
-                  }}
-                >
-                  {isSearching ? '🔍' : '🔍 Search'}
-                </button>
-              </div>
+        <div className="options-overlay">
+          <div className="welcome-container">
+            <div className="welcome-header">
+              <h1 className="welcome-title">🎵 Audio Visualizer</h1>
+              <p className="welcome-subtitle">Experience music like never before with stunning 3D visualizations</p>
             </div>
-
-            {/* Search Results */}
-            {showSearchResults && searchResults.length > 0 && (
-              <div style={{ border: '1px solid #333', padding: '20px', borderRadius: '10px', maxHeight: '300px', overflowY: 'auto' }}>
-                <h3>🎵 Search Results</h3>
-                {searchResults.map((video, index) => (
-                  <div key={index} style={{ 
-                    display: 'flex', 
-                    alignItems: 'center', 
-                    gap: '10px', 
-                    padding: '10px', 
-                    border: '1px solid #555', 
-                    borderRadius: '5px', 
-                    marginBottom: '10px',
-                    backgroundColor: '#222'
-                  }}>
-                    <img 
-                      src={video.thumbnail} 
-                      alt={video.title}
-                      style={{ width: '60px', height: '45px', objectFit: 'cover', borderRadius: '3px' }}
+            
+            <div className="options-grid">
+              {/* YouTube Search Section */}
+              <div className="option-card youtube-section">
+                <div className="card-header">
+                  <h3>🎵 YouTube Music</h3>
+                  <p>Search and download from millions of songs</p>
+                </div>
+                
+                <div className="search-container">
+                  <div className="search-input-group">
+                    <input
+                      type="text"
+                      placeholder="Search for songs, artists, or albums..."
+                      value={searchQuery}
+                      onChange={(e) => setSearchQuery(e.target.value)}
+                      onKeyPress={(e) => e.key === 'Enter' && searchYouTube(searchQuery)}
+                      className="search-input"
+                      disabled={isSearching}
                     />
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div style={{ 
-                        fontSize: '12px', 
-                        color: '#ccc', 
-                        whiteSpace: 'nowrap', 
-                        overflow: 'hidden', 
-                        textOverflow: 'ellipsis' 
-                      }}>
-                        {video.title}
-                      </div>
-                      <div style={{ fontSize: '10px', color: '#888', marginTop: '2px' }}>
-                        {video.duration} • {video.views}
-                      </div>
+                    <button
+                      onClick={() => searchYouTube(searchQuery)}
+                      disabled={isSearching || !searchQuery.trim()}
+                      className="search-button"
+                    >
+                      {isSearching ? (
+                        <span className="loading-spinner">⏳</span>
+                      ) : (
+                        <span>🔍 Search</span>
+                      )}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Search Results */}
+                {showSearchResults && searchResults.length > 0 && (
+                  <div className="search-results">
+                    <div className="results-header">
+                      <h4>Search Results</h4>
+                      <button
+                        onClick={() => setShowSearchResults(false)}
+                        className="close-results-btn"
+                      >
+                        ✕
+                      </button>
                     </div>
-                    <div style={{ display: 'flex', gap: '5px' }}>
-                      <button
-                        onClick={() => downloadFromYouTube(video.id, 'mp3')}
-                        disabled={isDownloading}
-                        style={{
-                          padding: '5px 10px',
-                          backgroundColor: isDownloading ? '#666' : '#00ff00',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '3px',
-                          cursor: isDownloading ? 'not-allowed' : 'pointer',
-                          fontSize: '10px'
-                        }}
-                      >
-                        MP3
-                      </button>
-                      <button
-                        onClick={() => downloadFromYouTube(video.id, 'mp4')}
-                        disabled={isDownloading}
-                        style={{
-                          padding: '5px 10px',
-                          backgroundColor: isDownloading ? '#666' : '#0066ff',
-                          color: 'white',
-                          border: 'none',
-                          borderRadius: '3px',
-                          cursor: isDownloading ? 'not-allowed' : 'pointer',
-                          fontSize: '10px'
-                        }}
-                      >
-                        MP4
-                      </button>
+                    <div className="results-list">
+                      {searchResults.map((video, index) => (
+                        <div key={index} className="result-item">
+                          <div className="result-thumbnail">
+                            <img 
+                              src={video.thumbnail} 
+                              alt={video.title}
+                              className="thumbnail-img"
+                            />
+                          </div>
+                          <div className="result-info">
+                            <h5 className="result-title" title={video.title}>
+                              {video.title}
+                            </h5>
+                            <p className="result-meta">
+                              {video.duration} • {video.views}
+                            </p>
+                          </div>
+                          <div className="result-actions">
+                            <button
+                              onClick={() => downloadFromYouTube(video.id, 'mp3')}
+                              disabled={isDownloading}
+                              className="download-btn mp3-btn"
+                            >
+                              MP3
+                            </button>
+                            <button
+                              onClick={() => downloadFromYouTube(video.id, 'mp4')}
+                              disabled={isDownloading}
+                              className="download-btn mp4-btn"
+                            >
+                              MP4
+                            </button>
+                          </div>
+                        </div>
+                      ))}
                     </div>
                   </div>
-                ))}
-                <button
-                  onClick={() => setShowSearchResults(false)}
-                  style={{
-                    width: '100%',
-                    padding: '8px',
-                    backgroundColor: '#333',
-                    color: 'white',
-                    border: 'none',
-                    borderRadius: '3px',
-                    cursor: 'pointer',
-                    fontSize: '12px',
-                    marginTop: '10px'
-                  }}
-                >
-                  Close Results
-                </button>
+                )}
               </div>
-            )}
 
-            {/* File Upload Section */}
-            <div style={{ border: '1px solid #333', padding: '20px', borderRadius: '10px' }}>
-              <h3>📁 Upload Audio File</h3>
-              <label htmlFor="thefile" className="file-input-label" style={{
-                display: 'block',
-                width: '100%',
-                padding: '10px',
-                backgroundColor: '#333',
-                textAlign: 'center',
-                borderRadius: '5px',
-                cursor: 'pointer'
-              }}>
-                Choose an audio file from your computer
-                <input
-                  ref={fileInputRef}
-                  type="file"
-                  id="thefile"
-                  accept="audio/*"
-                  onChange={handleFileChange}
-                  style={{ display: 'none' }}
-                />
-              </label>
-            </div>
-          </div>
-        </div>
-      )}
-
-      {downloadMessage && (
-        <div style={{
-          position: 'absolute',
-          top: '20px',
-          left: '50%',
-          transform: 'translateX(-50%)',
-          backgroundColor: downloadMessage.includes('✅') ? 'rgba(0, 200, 0, 0.9)' : 'rgba(200, 0, 0, 0.9)',
-          color: 'white',
-          padding: '15px 25px',
-          borderRadius: '10px',
-          zIndex: 12,
-          fontSize: '16px',
-          fontWeight: 'bold',
-          boxShadow: '0 4px 15px rgba(0, 0, 0, 0.3)',
-          animation: 'slideDown 0.3s ease-out'
-        }}>
-          {downloadMessage}
-        </div>
-      )}
-
-      {/* Always render audio element but hide it when no file */}
-      <audio ref={audioRef} controls style={{ width: 300, display: audioFile ? 'block' : 'none' }} />
-      
-      {audioFile && (
-        <div className="controls" style={{ position: 'absolute', bottom: controlsPosition, left: '50%', transform: 'translateX(-50%)', zIndex: 2 }}>
-          <div style={{ 
-            backgroundColor: 'rgba(0, 0, 0, 0.8)', 
-            padding: '15px', 
-            borderRadius: '10px', 
-            display: 'flex', 
-            flexDirection: 'column', 
-            alignItems: 'center',
-            gap: '10px'
-          }}>
-            <div style={{ color: 'white', fontSize: '14px', marginBottom: '5px' }}>
-              {audioFile?.name && `🎵 ${audioFile.name}`}
-            </div>
-            <button
-              onClick={async () => {
-                const audio = audioRef.current;
-                if (audio && !isLoading) {
-                  if (audio.paused) {
-                    try {
-                      if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
-                        await audioContextRef.current.resume();
-                      }
-                      await audio.play();
-                    } catch (e) {
-                      console.error('Play failed:', e);
-                      setDownloadMessage('❌ Play failed: ' + e.message);
-                      setTimeout(() => setDownloadMessage(''), 5000);
-                    }
-                  } else {
-                    audio.pause();
-                  }
-                }
-              }}
-              style={{
-                padding: '10px 20px',
-                backgroundColor: isPlaying ? '#ff4444' : '#44ff44',
-                color: 'white',
-                border: 'none',
-                borderRadius: '5px',
-                cursor: 'pointer',
-                fontSize: '14px'
-              }}
-            >
-              {isPlaying ? '⏸️ Pause' : '▶️ Play'}
-            </button>
-            <button
-              onClick={() => {
-                console.log('Change song clicked');
+              {/* File Upload Section */}
+              <div className="option-card upload-section">
+                <div className="card-header">
+                  <h3>📁 Upload Audio</h3>
+                  <p>Choose an audio file from your device</p>
+                </div>
                 
-                try {
-                  // Stop and clean up current audio
-                  const audio = audioRef.current;
-                  if (audio) {
-                    audio.pause();
-                    audio.src = '';
-                    audio.load();
-                  }
-                  
-                  // Clean up audio context and analyser
-                  cleanupAudio();
-                  
-                  // Reset file input to allow selecting same file again
-                  if (fileInputRef.current) {
-                    fileInputRef.current.value = '';
-                  }
-                  
-                  // Reset state
-                  setIsPlaying(false);
-                  setAudioFile(null);
-                  setShowOptions(true);
-                  setDownloadMessage('');
-                  
-                  console.log('Reset complete, showing file picker');
-                } catch (error) {
-                  console.error('Error during change song:', error);
-                  setDownloadMessage('❌ Error changing song');
-                  setTimeout(() => setDownloadMessage(''), 3000);
-                }
-              }}
-              style={{
-                padding: '10px 20px',
-                backgroundColor: '#333',
-                color: 'white',
-                border: 'none',
-                borderRadius: '5px',
-                cursor: 'pointer',
-                fontSize: '14px'
-              }}
-            >
-              🔄 Change Song
-            </button>
+                <label htmlFor="thefile" className="file-upload-area">
+                  <div className="upload-icon">📁</div>
+                  <div className="upload-text">
+                    <span className="upload-title">Choose Audio File</span>
+                    <span className="upload-subtitle">Supports MP3, WAV, M4A, and more</span>
+                  </div>
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    id="thefile"
+                    accept="audio/*"
+                    onChange={handleFileChange}
+                    className="file-input"
+                  />
+                </label>
+              </div>
+            </div>
           </div>
         </div>
       )}
+
+      {/* Status Messages */}
+      {downloadMessage && (
+        <div className={`status-message ${downloadMessage.includes('✅') ? 'success' : 'error'}`}>
+          <span className="status-icon">
+            {downloadMessage.includes('✅') ? '✅' : '❌'}
+          </span>
+          <span className="status-text">{downloadMessage}</span>
+        </div>
+      )}
+
+      {/* Loading Overlay */}
+      {isLoading && (
+        <div className="loading-overlay">
+          <div className="loading-spinner-large">⏳</div>
+          <p>Loading audio...</p>
+        </div>
+      )}
+
+      {/* Audio Controls */}
+      {audioFile && (
+        <div className="audio-controls">
+          <div className="controls-panel">
+            <div className="track-info">
+              <div className="track-icon">🎵</div>
+              <div className="track-details">
+                <h4 className="track-name">{audioFile?.name || 'Unknown Track'}</h4>
+                <p className="track-status">{isPlaying ? 'Now Playing' : 'Paused'}</p>
+              </div>
+            </div>
+            
+            <div className="control-buttons">
+              <button
+                onClick={async () => {
+                  const audio = audioRef.current;
+                  if (audio && !isLoading) {
+                    if (audio.paused) {
+                      try {
+                        if (audioContextRef.current && audioContextRef.current.state === 'suspended') {
+                          await audioContextRef.current.resume();
+                        }
+                        await audio.play();
+                      } catch (e) {
+                        console.error('Play failed:', e);
+                        setDownloadMessage('❌ Play failed: ' + e.message);
+                        setTimeout(() => setDownloadMessage(''), 5000);
+                      }
+                    } else {
+                      audio.pause();
+                    }
+                  }
+                }}
+                className={`play-button ${isPlaying ? 'playing' : 'paused'}`}
+                disabled={isLoading}
+              >
+                {isPlaying ? '⏸️' : '▶️'}
+              </button>
+              
+              <button
+                onClick={() => {
+                  console.log('Change song clicked');
+                  
+                  try {
+                    // Stop and clean up current audio
+                    const audio = audioRef.current;
+                    if (audio) {
+                      audio.pause();
+                      audio.src = '';
+                      audio.load();
+                    }
+                    
+                    // Clean up audio context and analyser
+                    cleanupAudio();
+                    
+                    // Reset file input to allow selecting same file again
+                    if (fileInputRef.current) {
+                      fileInputRef.current.value = '';
+                    }
+                    
+                    // Reset state
+                    setIsPlaying(false);
+                    setAudioFile(null);
+                    setShowOptions(true);
+                    setDownloadMessage('');
+                    
+                    console.log('Reset complete, showing file picker');
+                  } catch (error) {
+                    console.error('Error during change song:', error);
+                    setDownloadMessage('❌ Error changing song');
+                    setTimeout(() => setDownloadMessage(''), 3000);
+                  }
+                }}
+                className="change-button"
+                disabled={isLoading}
+              >
+                🔄
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Hidden audio element */}
+      <audio ref={audioRef} controls className="hidden-audio" />
     </div>
   );
 };
