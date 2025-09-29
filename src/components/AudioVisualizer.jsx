@@ -52,6 +52,15 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
   const [isSearching, setIsSearching] = useState(false);
   const [showSearchResults, setShowSearchResults] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
+  const [songQueue, setSongQueue] = useState(() => {
+    const saved = localStorage.getItem('audioVisualizerQueue');
+    return saved ? JSON.parse(saved) : [];
+  });
+  const [currentQueueIndex, setCurrentQueueIndex] = useState(() => {
+    const saved = localStorage.getItem('audioVisualizerCurrentIndex');
+    return saved ? parseInt(saved) : 0;
+  });
+  const [showQueue, setShowQueue] = useState(false);
   // Track whether audioFile changes are initiated internally (so we can notify parent only then)
   const shouldNotifyParentRef = useRef(false);
 
@@ -283,6 +292,16 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
     };
   }, []);
 
+  // Save queue to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('audioVisualizerQueue', JSON.stringify(songQueue));
+  }, [songQueue]);
+
+  // Save current index to localStorage whenever it changes
+  useEffect(() => {
+    localStorage.setItem('audioVisualizerCurrentIndex', currentQueueIndex.toString());
+  }, [currentQueueIndex]);
+
   // Handle prop changes
   useEffect(() => {
     if (propAudioFile && propAudioFile !== audioFile) {
@@ -308,6 +327,140 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
       audioRef.current.play();
       setIsPlaying(true);
     }
+  };
+
+  // Queue management functions
+  const addToQueue = (audioData) => {
+    const newSong = {
+      id: Date.now() + Math.random(),
+      name: audioData.name || audioData.title || 'Unknown Track',
+      url: audioData.url,
+      type: audioData.type || 'uploaded',
+      thumbnail: audioData.thumbnail || null,
+      duration: audioData.duration || null
+    };
+    
+    setSongQueue(prev => [...prev, newSong]);
+    
+    // If no current song is playing, play this one
+    if (!audioFile) {
+      setCurrentQueueIndex(songQueue.length);
+      setAudioFile(newSong);
+    }
+  };
+
+  const removeFromQueue = (index) => {
+    setSongQueue(prev => {
+      const newQueue = prev.filter((_, i) => i !== index);
+      
+      // Adjust current index if needed
+      if (index < currentQueueIndex) {
+        setCurrentQueueIndex(prev => prev - 1);
+      } else if (index === currentQueueIndex) {
+        // If we're removing the current song, play the next one or stop
+        if (newQueue.length > 0) {
+          const nextIndex = Math.min(currentQueueIndex, newQueue.length - 1);
+          setCurrentQueueIndex(nextIndex);
+          setAudioFile(newQueue[nextIndex]);
+        } else {
+          setCurrentQueueIndex(0);
+          setAudioFile(null);
+          setIsPlaying(false);
+        }
+      }
+      
+      return newQueue;
+    });
+  };
+
+  const playFromQueue = async (index) => {
+    if (songQueue[index] && !isLoading) {
+      const selectedSong = songQueue[index];
+      setIsLoading(true);
+      setCurrentQueueIndex(index);
+      setShowOptions(false);
+      
+      try {
+        // Clean up existing audio context
+        cleanupAudio();
+        
+        // Stop current audio and wait for it to stop
+        const audio = audioRef.current;
+        if (audio) {
+          audio.pause();
+          audio.currentTime = 0;
+          
+          // Wait a bit before loading new audio
+          await new Promise(resolve => setTimeout(resolve, 100));
+          
+          audio.src = '';
+          audio.load();
+        }
+        
+        // Set the new audio file
+        setAudioFile(selectedSong);
+        
+        // Load the new audio
+        if (audio) {
+          const handleLoadedData = () => {
+            setupAudioAnalyser(audio);
+            audio.play().then(() => {
+              setIsPlaying(true);
+              setIsLoading(false);
+            }).catch((e) => {
+              setDownloadMessage('⚠️ Click play to start (auto-play blocked)');
+              setTimeout(() => setDownloadMessage(''), 3000);
+              setIsLoading(false);
+            });
+            
+            // Remove event listener after use
+            audio.removeEventListener('loadeddata', handleLoadedData);
+          };
+          
+          const handleError = (e) => {
+            console.error('Audio loading error:', e);
+            setDownloadMessage('❌ Error loading audio file');
+            setTimeout(() => setDownloadMessage(''), 5000);
+            setIsLoading(false);
+            
+            // Remove event listener after use
+            audio.removeEventListener('error', handleError);
+          };
+          
+          audio.addEventListener('loadeddata', handleLoadedData);
+          audio.addEventListener('error', handleError);
+          
+          audio.src = selectedSong.url;
+          audio.load();
+        }
+      } catch (error) {
+        console.error('Error playing from queue:', error);
+        setDownloadMessage('❌ Error playing song');
+        setTimeout(() => setDownloadMessage(''), 3000);
+        setIsLoading(false);
+      }
+    }
+  };
+
+  const skipNext = () => {
+    if (currentQueueIndex < songQueue.length - 1 && !isLoading) {
+      const nextIndex = currentQueueIndex + 1;
+      playFromQueue(nextIndex);
+    }
+  };
+
+  const skipPrevious = () => {
+    if (currentQueueIndex > 0 && !isLoading) {
+      const prevIndex = currentQueueIndex - 1;
+      playFromQueue(prevIndex);
+    }
+  };
+
+  const clearQueue = () => {
+    setSongQueue([]);
+    setCurrentQueueIndex(0);
+    setAudioFile(null);
+    setIsPlaying(false);
   };
 
   // Expose playAudioFile function to parent component without causing render loops
@@ -353,6 +506,7 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
       const results = await response.json();
       
       if (results.success) {
+        console.log('🔍 Search results received:', results.data);
         setSearchResults(results.data);
         setShowSearchResults(true);
         setDownloadMessage('✅ Search completed!');
@@ -370,7 +524,127 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
     }
   };
 
+  const downloadAndPlayNow = async (videoId, format = 'mp3') => {
+    console.log('🎵 DownloadAndPlayNow called with videoId:', videoId, 'format:', format);
+    setIsDownloading(true);
+    setDownloadMessage('🎵 Downloading and will play immediately...');
+    
+    try {
+      const response = await fetch(API_ENDPOINTS.DOWNLOAD, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          videoId: videoId,
+          format: format
+        })
+      });
+      
+      const result = await response.json();
+      
+      if (result.success) {
+        setDownloadMessage('✅ Downloaded! Playing now...');
+        
+        // Convert base64 to blob
+        const binaryString = atob(result.audioData);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+        const blob = new Blob([bytes], { type: 'audio/mpeg' });
+        
+        // Create a file object from the downloaded audio
+        const downloadedFile = new File([blob], result.filename, { type: 'audio/mpeg' });
+        
+        // Find the video info from search results
+        const videoInfo = searchResults.find(video => video.id === videoId);
+        
+        // Create song data
+        const songData = {
+          name: result.filename,
+          url: URL.createObjectURL(downloadedFile),
+          type: 'downloaded',
+          thumbnail: videoInfo?.thumbnail || '',
+          duration: videoInfo?.duration || 0
+        };
+        
+        // Add to queue
+        addToQueue(songData);
+        
+        // Set as current audio file and play immediately
+        shouldNotifyParentRef.current = true;
+        setAudioFile(songData);
+        setShowOptions(false);
+        setShowSearchResults(false);
+        
+        // Load and play the audio immediately
+        const audio = audioRef.current;
+        if (audio && !isLoading) {
+          setIsLoading(true);
+          
+          // Clean up existing audio context
+          cleanupAudio();
+          
+          // Stop current audio and wait
+          audio.pause();
+          audio.currentTime = 0;
+          
+          // Wait a bit before loading new audio
+          await new Promise(resolve => setTimeout(resolve, 100));
+          
+          audio.src = '';
+          audio.load();
+          
+          const handleLoadedData = () => {
+            setupAudioAnalyser(audio);
+            audio.play().then(() => {
+              setIsPlaying(true);
+              setIsLoading(false);
+              setDownloadMessage('🎵 Now playing!');
+            }).catch((e) => {
+              setDownloadMessage('⚠️ Click play to start (auto-play blocked)');
+              setTimeout(() => setDownloadMessage(''), 3000);
+              setIsLoading(false);
+            });
+            
+            // Remove event listener after use
+            audio.removeEventListener('loadeddata', handleLoadedData);
+          };
+          
+          const handleError = (e) => {
+            console.error('Audio loading error:', e);
+            setDownloadMessage('❌ Error loading audio file');
+            setTimeout(() => setDownloadMessage(''), 5000);
+            setIsLoading(false);
+            
+            // Remove event listener after use
+            audio.removeEventListener('error', handleError);
+          };
+          
+          audio.addEventListener('loadeddata', handleLoadedData);
+          audio.addEventListener('error', handleError);
+          
+          audio.src = songData.url;
+          audio.load();
+        }
+        
+        setTimeout(() => setDownloadMessage(''), 2000);
+      } else {
+        setDownloadMessage('❌ Download failed: ' + result.error);
+        setTimeout(() => setDownloadMessage(''), 5000);
+      }
+    } catch (error) {
+      console.error('Download error:', error);
+      setDownloadMessage('❌ Download failed: ' + error.message);
+      setTimeout(() => setDownloadMessage(''), 5000);
+    } finally {
+      setIsDownloading(false);
+    }
+  };
+
   const downloadFromYouTube = async (videoId, format = 'mp3') => {
+    console.log('⬇️ DownloadFromYouTube called with videoId:', videoId, 'format:', format);
     setIsDownloading(true);
     setDownloadMessage(`⬇️ Downloading ${format.toUpperCase()}...`);
     
@@ -389,7 +663,7 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
       const result = await response.json();
       
       if (result.success) {
-        setDownloadMessage('✅ Download completed!');
+        setDownloadMessage('✅ Downloaded and added to queue!');
         
         // Convert base64 to blob
         const binaryString = atob(result.audioData);
@@ -400,51 +674,82 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
         const blob = new Blob([bytes], { type: 'audio/mpeg' });
         
         // Create a file object from the downloaded audio
-        const audioFile = new File([blob], result.filename, { type: 'audio/mpeg' });
-        // mark as internal change so we notify parent once
-        shouldNotifyParentRef.current = true;
-        setAudioFile(audioFile);
-        setShowOptions(false);
-        setShowSearchResults(false);
+        const downloadedFile = new File([blob], result.filename, { type: 'audio/mpeg' });
         
-        // Load the audio
-        const audio = audioRef.current;
-        if (audio && !isLoading) {
-          setIsLoading(true);
+        // Find the video info from search results
+        const videoInfo = searchResults.find(video => video.id === videoId);
+        
+        // Add to queue
+        const songData = {
+          name: result.filename,
+          url: URL.createObjectURL(downloadedFile),
+          type: 'downloaded',
+          thumbnail: videoInfo?.thumbnail || '',
+          duration: videoInfo?.duration || 0
+        };
+        addToQueue(songData);
+        
+        // If this is the first song or no song is currently playing, play it
+        if (songQueue.length === 0 || !audioFile) {
+          // mark as internal change so we notify parent once
+          shouldNotifyParentRef.current = true;
+          setAudioFile(songData);
+          setShowOptions(false);
+          setShowSearchResults(false);
           
-          // Clean up existing audio context
-          cleanupAudio();
-          
-          // Stop current audio and wait
-          audio.pause();
-          audio.currentTime = 0;
-          
-          // Wait a bit before loading new audio
-          await new Promise(resolve => setTimeout(resolve, 100));
-          
-          audio.src = '';
-          audio.load();
-          
-          const audioUrl = URL.createObjectURL(audioFile);
-          
-          const handleLoadedData = () => {
-            setupAudioAnalyser(audio);
-            audio.play().then(() => {
-              setIsPlaying(true);
-              setIsLoading(false);
-            }).catch((e) => {
-              setDownloadMessage('⚠️ Click play to start (auto-play blocked)');
-              setTimeout(() => setDownloadMessage(''), 3000);
-              setIsLoading(false);
-            });
+          // Load and play the audio immediately
+          const audio = audioRef.current;
+          if (audio && !isLoading) {
+            setIsLoading(true);
             
-            // Remove event listener after use
-            audio.removeEventListener('loadeddata', handleLoadedData);
-          };
-          
-          audio.addEventListener('loadeddata', handleLoadedData);
-          audio.src = audioUrl;
-          audio.load();
+            // Clean up existing audio context
+            cleanupAudio();
+            
+            // Stop current audio and wait
+            audio.pause();
+            audio.currentTime = 0;
+            
+            // Wait a bit before loading new audio
+            await new Promise(resolve => setTimeout(resolve, 100));
+            
+            audio.src = '';
+            audio.load();
+            
+            const handleLoadedData = () => {
+              setupAudioAnalyser(audio);
+              audio.play().then(() => {
+                setIsPlaying(true);
+                setIsLoading(false);
+              }).catch((e) => {
+                setDownloadMessage('⚠️ Click play to start (auto-play blocked)');
+                setTimeout(() => setDownloadMessage(''), 3000);
+                setIsLoading(false);
+              });
+              
+              // Remove event listener after use
+              audio.removeEventListener('loadeddata', handleLoadedData);
+            };
+            
+            const handleError = (e) => {
+              console.error('Audio loading error:', e);
+              setDownloadMessage('❌ Error loading audio file');
+              setTimeout(() => setDownloadMessage(''), 5000);
+              setIsLoading(false);
+              
+              // Remove event listener after use
+              audio.removeEventListener('error', handleError);
+            };
+            
+            audio.addEventListener('loadeddata', handleLoadedData);
+            audio.addEventListener('error', handleError);
+            
+            audio.src = songData.url;
+            audio.load();
+          }
+        } else {
+          // Just add to queue and show success message
+          setDownloadMessage('✅ Added to queue! Click queue button to view.');
+          setShowSearchResults(false);
         }
         
         setTimeout(() => setDownloadMessage(''), 2000);
@@ -521,9 +826,20 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
     
     console.log('File selected:', file.name);
     setIsLoading(true);
+    
+    // Add to queue
+    const songData = {
+      name: file.name,
+      url: URL.createObjectURL(file),
+      type: 'uploaded',
+      thumbnail: null,
+      duration: null
+    };
+    addToQueue(songData);
+    
     // mark as internal change so we notify parent once
     shouldNotifyParentRef.current = true;
-    setAudioFile(file);
+    setAudioFile(songData);
     setShowOptions(false);
     
     // Clean up existing audio context
@@ -661,18 +977,34 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
                           </div>
                           <div className="result-actions">
                             <button
-                              onClick={() => downloadFromYouTube(video.id, 'mp3')}
+                              onClick={() => {
+                                console.log('🎵 MP3 button clicked for video:', video);
+                                downloadFromYouTube(video.id, 'mp3');
+                              }}
                               disabled={isDownloading}
                               className="download-btn mp3-btn"
+                              title="Download MP3 and Add to Queue"
                             >
-                              MP3
+                              {isDownloading ? '⏳' : '🎵 MP3'}
                             </button>
                             <button
                               onClick={() => downloadFromYouTube(video.id, 'mp4')}
                               disabled={isDownloading}
                               className="download-btn mp4-btn"
+                              title="Download MP4 and Add to Queue"
                             >
-                              MP4
+                              {isDownloading ? '⏳' : '🎬 MP4'}
+                            </button>
+                            <button
+                              onClick={() => {
+                                console.log('▶️ Play Now button clicked for video:', video);
+                                downloadAndPlayNow(video.id, 'mp3');
+                              }}
+                              disabled={isDownloading}
+                              className="download-btn play-now-btn"
+                              title="Download and Play Now"
+                            >
+                              {isDownloading ? '⏳' : '▶️ Play Now'}
                             </button>
                           </div>
                         </div>
@@ -742,6 +1074,15 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
             
             <div className="control-buttons">
               <button
+                onClick={skipPrevious}
+                className="skip-button"
+                disabled={isLoading || currentQueueIndex === 0}
+                title="Previous Song"
+              >
+                ⏮️
+              </button>
+              
+              <button
                 onClick={async () => {
                   const audio = audioRef.current;
                   if (audio && !isLoading) {
@@ -763,8 +1104,27 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
                 }}
                 className={`play-button ${isPlaying ? 'playing' : 'paused'}`}
                 disabled={isLoading}
+                title={isPlaying ? 'Pause' : 'Play'}
               >
                 {isPlaying ? '⏸️' : '▶️'}
+              </button>
+              
+              <button
+                onClick={skipNext}
+                className="skip-button"
+                disabled={isLoading || currentQueueIndex >= songQueue.length - 1}
+                title="Next Song"
+              >
+                ⏭️
+              </button>
+              
+              <button
+                onClick={() => setShowQueue(!showQueue)}
+                className="queue-button"
+                disabled={isLoading}
+                title="Toggle Queue"
+              >
+                📋
               </button>
               
               <button
@@ -803,10 +1163,89 @@ const AudioVisualizer = ({ audioFile: propAudioFile, onAudioChange }) => {
                 }}
                 className="change-button"
                 disabled={isLoading}
+                title="Add More Songs"
               >
-                🔄
+                ➕
               </button>
             </div>
+          </div>
+        </div>
+      )}
+
+      {/* Queue Panel */}
+      {showQueue && (
+        <div className="queue-panel">
+          <div className="queue-header">
+            <h3>🎵 Play Queue ({songQueue.length} songs)</h3>
+            <div className="queue-actions">
+              <button
+                onClick={clearQueue}
+                className="clear-queue-btn"
+                disabled={songQueue.length === 0}
+                title="Clear Queue"
+              >
+                🗑️ Clear
+              </button>
+              <button
+                onClick={() => setShowQueue(false)}
+                className="close-queue-btn"
+                title="Close Queue"
+              >
+                ✕
+              </button>
+            </div>
+          </div>
+          
+          <div className="queue-list">
+            {songQueue.length === 0 ? (
+              <div className="empty-queue">
+                <p>No songs in queue</p>
+                <p>Add songs to start building your playlist!</p>
+              </div>
+            ) : (
+              songQueue.map((song, index) => (
+                <div
+                  key={song.id}
+                  className={`queue-item ${index === currentQueueIndex ? 'current' : ''}`}
+                  onClick={() => playFromQueue(index)}
+                >
+                  <div className="queue-item-info">
+                    <div className="queue-item-thumbnail">
+                      {song.thumbnail ? (
+                        <img src={song.thumbnail} alt={song.name} />
+                      ) : (
+                        <div className="default-thumbnail">🎵</div>
+                      )}
+                    </div>
+                    <div className="queue-item-details">
+                      <h4 className="queue-item-title">{song.name}</h4>
+                      <p className="queue-item-meta">
+                        {song.type === 'downloaded' ? '📥 Downloaded' : '📁 Uploaded'}
+                        {song.duration && ` • ${song.duration}`}
+                      </p>
+                    </div>
+                  </div>
+                  
+                  <div className="queue-item-actions">
+                    {index === currentQueueIndex && (
+                      <span className="current-indicator">
+                        {isLoading ? '⏳' : '▶️'}
+                      </span>
+                    )}
+                    <button
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        removeFromQueue(index);
+                      }}
+                      className="remove-queue-btn"
+                      title="Remove from Queue"
+                    >
+                      ❌
+                    </button>
+                  </div>
+                </div>
+              ))
+            )}
           </div>
         </div>
       )}

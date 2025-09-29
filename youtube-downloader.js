@@ -183,6 +183,35 @@ async function checkYtDlp() {
     }
 }
 
+// Function to update yt-dlp to latest version
+async function updateYtDlp() {
+    try {
+        console.log('🔄 Updating yt-dlp to latest version...');
+        await execAsync('pip install --upgrade yt-dlp');
+        console.log('✅ yt-dlp updated successfully!');
+        return true;
+    } catch (error) {
+        console.log('❌ Failed to update yt-dlp:', error.message);
+        return false;
+    }
+}
+
+// Helper to extract a YouTube video ID from a URL
+function extractVideoId(url) {
+    try {
+        // Standard watch URL
+        let match = url.match(/[?&]v=([^&#]+)/);
+        if (match && match[1]) return match[1];
+        // youtu.be short URL
+        match = url.match(/youtu\.be\/([^?#/]+)/);
+        if (match && match[1]) return match[1];
+        // shorts URL
+        match = url.match(/youtube\.com\/shorts\/([^?#/]+)/);
+        if (match && match[1]) return match[1];
+    } catch (_) {}
+    return null;
+}
+
 // Function to download using yt-dlp (primary method - faster!)
 async function downloadWithYtDlp(url, format = 'mp4', outputPath = './downloads') {
     try {
@@ -192,82 +221,170 @@ async function downloadWithYtDlp(url, format = 'mp4', outputPath = './downloads'
         if (!fs.existsSync(outputPath)) {
             fs.mkdirSync(outputPath, { recursive: true });
         }
-
-        const outputTemplate = `${outputPath}/%(title)s.%(ext)s`;
         
-        let command;
+        const videoId = extractVideoId(url);
+        // Include video ID in filename to disambiguate files and avoid stale matches
+        const outputTemplate = videoId
+            ? `${outputPath}/%(id)s-%(title)s.%(ext)s`
+            : `${outputPath}/%(title)s.%(ext)s`;
+        
+        // Try multiple download strategies
+        const downloadStrategies = [];
+        
         if (format === 'mp3') {
-            // Simplified MP3 download
-            command = `yt-dlp --extract-audio --audio-format mp3 --audio-quality 192K -o "${outputTemplate}" --no-playlist "${url}"`;
+            downloadStrategies.push(
+                // Strategy 1: Android client with best quality
+                `yt-dlp --extract-audio --audio-format mp3 --audio-quality 192K -o "${outputTemplate}" --no-playlist --extractor-args "youtube:player_client=android" "${url}"`,
+                // Strategy 2: Web client with lower quality
+                `yt-dlp --extract-audio --audio-format mp3 --audio-quality 128K -o "${outputTemplate}" --no-playlist --extractor-args "youtube:player_client=web" "${url}"`,
+                // Strategy 3: Fallback with any available audio
+                `yt-dlp --extract-audio --audio-format mp3 -o "${outputTemplate}" --no-playlist --ignore-errors "${url}"`
+            );
         } else {
-            // Simplified MP4 download
-            command = `yt-dlp -f "best[ext=mp4]/best" -o "${outputTemplate}" --no-playlist "${url}"`;
+            downloadStrategies.push(
+                // Strategy 1: Best quality with Android client
+                `yt-dlp -f "best[ext=mp4]/best[height<=720]/best" -o "${outputTemplate}" --no-playlist --extractor-args "youtube:player_client=android" "${url}"`,
+                // Strategy 2: Lower quality with web client
+                `yt-dlp -f "best[height<=480]/best" -o "${outputTemplate}" --no-playlist --extractor-args "youtube:player_client=web" "${url}"`,
+                // Strategy 3: Fallback with any available format
+                `yt-dlp -f "best" -o "${outputTemplate}" --no-playlist --ignore-errors "${url}"`
+            );
         }
         
-        console.log('🔧 Command:', command);
-
-        console.log('⬇️ Starting fast download...');
+        // Try each strategy until one works
+        for (let i = 0; i < downloadStrategies.length; i++) {
+            const command = downloadStrategies[i];
+            console.log(`🔧 Strategy ${i + 1}:`, command);
+            
+            try {
+                const result = await executeDownloadCommand(command, url);
+                if (result) {
+                    console.log(`✅ Strategy ${i + 1} succeeded!`);
+                    return result;
+                }
+            } catch (error) {
+                console.log(`❌ Strategy ${i + 1} failed:`, error.message);
+                if (i === downloadStrategies.length - 1) {
+                    throw error; // Re-throw if all strategies failed
+                }
+            }
+        }
         
-        // Execute with better error handling
+        throw new Error('All download strategies failed');
+    } catch (error) {
+        console.log('❌ Fast download failed:', error.message);
+        return false;
+    }
+}
+
+// Helper function to execute a single download command
+async function executeDownloadCommand(command, url) {
+    return new Promise((resolve, reject) => {
+        console.log('⬇️ Starting download...');
+        
         const child = exec(command);
         
         let errorOutput = '';
         let standardOutput = '';
+        const expectedId = extractVideoId(url);
         
         child.stdout.on('data', (data) => {
             const output = data.toString();
             standardOutput += output;
-            console.log(output); // Show all output for debugging
+            console.log(output);
             
             if (output.includes('%')) {
-                // Extract and show progress
                 const progressMatch = output.match(/(\d+(?:\.\d+)?)%/);
                 if (progressMatch) {
-                    process.stdout.write(`\r📊 Progress: ${progressMatch[1]}%`);
+                    const progress = parseFloat(progressMatch[1]);
+                    if (progress % 10 === 0) {
+                        console.log(`📊 Progress: ${progress}%`);
+                    }
                 }
             }
         });
         
         child.stderr.on('data', (data) => {
-            errorOutput += data.toString();
-            console.log('❌ Error output:', data.toString());
+            const error = data.toString();
+            errorOutput += error;
+            console.log('❌ Error output:', error);
         });
         
-        return new Promise((resolve, reject) => {
-            child.on('close', (code) => {
-                if (code === 0) {
-                    console.log('\n✅ Download completed successfully!');
-                    // Extract the actual file path from the output
-                    const fileMatch = standardOutput.match(/Destination: (\.\/downloads\/[^\n]+)/);
-                    if (fileMatch) {
-                        resolve(fileMatch[1]);
+        child.on('close', (code) => {
+            if (code === 0) {
+                console.log('✅ Download completed successfully!');
+                
+                // Try multiple patterns to extract file path
+                let filePath = null;
+                
+                // First, strip ANSI escape sequences (colors) just in case
+                const cleanedOutput = standardOutput.replace(/\u001b\[[0-9;]*m/g, '');
+                
+                // Pattern 1: Destination: ./downloads/filename (any prefix)
+                const fileMatch = cleanedOutput.match(/Destination:\s+(\.\/downloads\/[^^\n]+\.(mp3|mp4|m4a|wav))/i);
+                if (fileMatch) {
+                    filePath = fileMatch[1];
+                } else {
+                    // Pattern 2: [download] Destination: ./downloads/filename
+                    const titleMatch = cleanedOutput.match(/\[download\]\s+Destination:\s+\.\/downloads\/([^\n]+\.(mp3|mp4|m4a|wav))/i);
+                    if (titleMatch) {
+                        filePath = `./downloads/${titleMatch[1]}`;
                     } else {
-                        // Fallback: construct expected filename
-                        const titleMatch = standardOutput.match(/\[download\] Destination: \.\/downloads\/([^\n]+)/);
-                        if (titleMatch) {
-                            resolve(`./downloads/${titleMatch[1]}`);
+                        // Pattern 3: [download] 100% of filename
+                        const progressMatch = cleanedOutput.match(/\[download\]\s+100% of\s+([^\n]+\.(mp3|mp4|m4a|wav))/i);
+                        if (progressMatch) {
+                            filePath = `./downloads/${progressMatch[1]}`;
                         } else {
-                            resolve(true); // Fallback to true if we can't extract path
+                            // Fallback: prefer files that start with the expected video ID
+                            try {
+                                const files = fs.readdirSync('./downloads');
+                                let candidates = files.filter(f => f.endsWith('.mp3') || f.endsWith('.mp4'));
+                                if (expectedId) {
+                                    const idMatches = candidates.filter(f => f.startsWith(`${expectedId}-`));
+                                    if (idMatches.length > 0) {
+                                        // Choose the newest among ID matches
+                                        const latestIdMatch = idMatches.reduce((latest, current) => {
+                                            const latestPath = `./downloads/${latest}`;
+                                            const currentPath = `./downloads/${current}`;
+                                            return fs.statSync(currentPath).mtime > fs.statSync(latestPath).mtime ? current : latest;
+                                        });
+                                        filePath = `./downloads/${latestIdMatch}`;
+                                    }
+                                }
+                                // Final fallback: newest file (rarely used now)
+                                if (!filePath && candidates.length > 0) {
+                                    const latestFile = candidates.reduce((latest, current) => {
+                                        const latestPath = `./downloads/${latest}`;
+                                        const currentPath = `./downloads/${current}`;
+                                        return fs.statSync(currentPath).mtime > fs.statSync(latestPath).mtime ? current : latest;
+                                    });
+                                    filePath = `./downloads/${latestFile}`;
+                                }
+                            } catch (_) {}
                         }
                     }
-                } else {
-                    console.log(`\n❌ Command failed with exit code: ${code}`);
-                    console.log('📋 Error details:', errorOutput);
-                    console.log('📋 Full output:', standardOutput);
-                    reject(new Error(`Download failed with exit code ${code}: ${errorOutput}`));
                 }
-            });
-            
-            child.on('error', (error) => {
-                console.log('❌ Process error:', error.message);
-                reject(error);
-            });
+                
+                if (filePath && fs.existsSync(filePath)) {
+                    console.log(`📁 File found: ${filePath}`);
+                    resolve(filePath);
+                } else {
+                    console.log('❌ Could not determine file path from output');
+                    console.log('📋 Standard output:', cleanedOutput);
+                    reject(new Error('Could not determine downloaded file path'));
+                }
+            } else {
+                console.log(`\n❌ Command failed with exit code: ${code}`);
+                console.log('📋 Error details:', errorOutput);
+                reject(new Error(`Download failed with exit code ${code}: ${errorOutput}`));
+            }
         });
         
-    } catch (error) {
-        console.log('❌ Fast download failed:', error.message);
-        return false;
-    }
+        child.on('error', (error) => {
+            console.log('❌ Process error:', error.message);
+            reject(error);
+        });
+    });
 }
 
 // Function to get video info with retry logic
@@ -322,8 +439,21 @@ async function downloadVideo(url, outputPath = './downloads') {
             throw new Error('yt-dlp not available');
         }
 
-        // Use yt-dlp immediately as primary method
-        return await downloadWithYtDlp(url, 'mp4', outputPath);
+        // Try downloading with yt-dlp
+        try {
+            return await downloadWithYtDlp(url, 'mp3', outputPath);
+        } catch (error) {
+            console.log('❌ First attempt failed, trying to update yt-dlp...');
+            
+            // Try updating yt-dlp and retry
+            const updateSuccess = await updateYtDlp();
+            if (updateSuccess) {
+                console.log('🔄 Retrying download with updated yt-dlp...');
+                return await downloadWithYtDlp(url, 'mp3', outputPath);
+            } else {
+                throw error;
+            }
+        }
 
     } catch (error) {
         console.log(`❌ Error: ${error.message}`);
@@ -351,8 +481,21 @@ async function downloadAudio(url, outputPath = './downloads') {
             throw new Error('yt-dlp not available');
         }
 
-        // Use yt-dlp immediately as primary method
-        return await downloadWithYtDlp(url, 'mp3', outputPath);
+        // Try downloading with yt-dlp
+        try {
+            return await downloadWithYtDlp(url, 'mp3', outputPath);
+        } catch (error) {
+            console.log('❌ First attempt failed, trying to update yt-dlp...');
+            
+            // Try updating yt-dlp and retry
+            const updateSuccess = await updateYtDlp();
+            if (updateSuccess) {
+                console.log('🔄 Retrying download with updated yt-dlp...');
+                return await downloadWithYtDlp(url, 'mp3', outputPath);
+            } else {
+                throw error;
+            }
+        }
 
     } catch (error) {
         console.log(`❌ Error: ${error.message}`);
